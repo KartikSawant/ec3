@@ -11,7 +11,8 @@ list_instances() {
         instance_info=$(echo "$line" | cut -d '=' -f2)
         instance_id=$(echo "$instance_info" | cut -d ':' -f1)
         region=$(echo "$instance_info" | cut -d ':' -f2)
-        echo "Alias: $instance_alias, Instance ID: $instance_id, Region: $region"
+        ssh_host=$(echo "$instance_info" | cut -d ':' -f3-)
+        echo "Alias: $instance_alias, Instance ID: $instance_id, Region: $region, SSH Host: ${ssh_host:-N/A}"
     done
 }
 
@@ -20,6 +21,7 @@ get_instance_info() {
     instance_info=$(grep -w "^$alias" "$map_file" | cut -d '=' -f2)
     instance_id=$(echo "$instance_info" | cut -d ':' -f1)
     region=$(echo "$instance_info" | cut -d ':' -f2)
+    ssh_alias=$(echo "$instance_info" | cut -d ':' -f3-)
 }
 
 # Function to get public IP
@@ -71,9 +73,31 @@ start_instance() {
         aws ec2 wait instance-running --instance-ids "$instance_id" --region "$region"
         get_public_ip
         echo "Instance with ID '$instance_id' in region '$region' is now running with public IP: $public_ip"
+        [ "$update_flag" = true ] && update_ssh_config
     else
         echo "Failed to start instance with ID '$instance_id' in region '$region'."
     fi
+}
+
+# Function to update SSH config
+update_ssh_config() {
+    if [ -z "$ssh_alias" ]; then
+        echo "No SSH alias provided for '$alias'; skipping SSH config update."
+        return
+    fi
+
+    echo "Updating SSH config for Host '$ssh_alias' with IP '$public_ip'"
+
+    tmp_file=$(mktemp)
+
+    awk -v host="$ssh_alias" -v ip="$public_ip" '
+    BEGIN { found=0 }
+    $1 == "Host" && $2 == host { found=1; print; next }
+    found == 1 && $1 == "HostName" { print "  HostName " ip; found=0; next }
+    { print }
+    ' "$ssh_config" > "$tmp_file" && mv "$tmp_file" "$ssh_config"
+
+    echo "SSH config updated: ssh $ssh_alias"
 }
 
 # Main script execution
@@ -85,7 +109,14 @@ fi
 
 action="$1"
 alias="$2"
+update_flag=false
+
+if [[ "$3" == "--update" ]]; then
+  update_flag=true
+fi
+
 map_file="$HOME/.ec3rc"
+ssh_config="$HOME/.ssh/config"
 
 if [ ! -f "$map_file" ]; then
     echo "Mapping file '$map_file' not found."

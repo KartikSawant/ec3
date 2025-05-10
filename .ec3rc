@@ -1,2 +1,2 @@
 <alias>=<instance_id>:<region>
-<alias>=<instance_id>:<region>
+<alias>=<instance_id>:<region>:<ssh_host_name>
